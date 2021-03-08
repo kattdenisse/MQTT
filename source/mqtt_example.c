@@ -82,7 +82,7 @@
 #define EXAMPLE_MQTT_SERVER_HOST "io.adafruit.com"
 
 #define EXAMPLE_MQTT_USER "KattDenisse"
-#define EXAMPLE_MQTT_PSWD "aio_mzDz74rXTxbbpNG0CX1CNC3UDO4K"
+#define EXAMPLE_MQTT_PSWD "aio_YwDW97vt9S1yIHXUioPyeF8MiMgr"
 
 /*! @brief MQTT server port number. */
 #define EXAMPLE_MQTT_SERVER_PORT 1883
@@ -102,6 +102,8 @@
 #define BOARD_LED_GPIO BOARD_LED_RED_GPIO
 #define BOARD_LED_GPIO_PIN BOARD_LED_RED_GPIO_PIN
 
+#define MQTT_nMaxSuscribers				(50)
+
 /*******************************************************************************
  * Prototypes
  ******************************************************************************/
@@ -111,8 +113,10 @@ static int32_t get_simulated_sensor(int32_t current_value, int32_t max_step,
 		                     int32_t min_value, int32_t max_value,
 							 bool increase);
 static void sensor_timer_callback(TimerHandle_t pxTimer);
-static void publish_humidity(void *ctx);
-
+/*To do Katy*/
+//static void GetAutomaticTemp(void);
+static void publish_Air_conditioner(void *ctx);
+static void publish_temperature(void *ctx);
 
 /*******************************************************************************
  * Variables
@@ -147,8 +151,11 @@ EventGroupHandle_t xEventGroup;
 
 TimerHandle_t xTimerSensor;
 
-uint32_t humidity_sensor = 50;
+uint32_t u32Air_sensor = 15;
+uint32_t u32Temp_sensor = 20;
+uint32_t TempDes_sensor = 30;
 uint32_t samples_cnt = 0;
+uint8_t u8Mode_state = 0U;
 bool sprinklers_on;
 
 
@@ -205,16 +212,24 @@ static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t f
         }
     }
 
-    if(!memcmp(data, "ON", 2)) {
-    	sprinklers_on = true;
-    	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
+    if(!memcmp(data, "Manual", 6)) {
+    	u8Mode_state = 1U;
+//   	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
-    else if(!memcmp(data, "OFF", 3)) {
-    	sprinklers_on = false;
-    	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
+    else if(!memcmp(data, "Auto", 4)) {
+    	u8Mode_state = 0U;
+//    	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
-    else if(!memcmp(data, "1", 1)) {
+    else if(!memcmp(data, 1, 1)) {
         PRINTF("\r Button ON\r\n");
+    }
+    else if(!memcmp(data, 2, 1)) {
+        PRINTF("\r Button OFF\r\n");
+    }
+    else if(!memcmp(data, "55", 1)) {
+    	//Temperatura deseada
+    	TempDes_sensor = *data;
+        PRINTF("\r Temperature Des: %d\r\n", TempDes_sensor);
     }
 
     if (flags & MQTT_DATA_FLAG_LAST)
@@ -228,13 +243,15 @@ static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t f
  */
 static void mqtt_subscribe_topics(mqtt_client_t *client)
 {
-    static const char *topics[] = {"KattDenisse/feeds/sprinkler"};
-    int qos[]                   = {0};
+//    static const char *topics[] = {"KattDenisse/feeds/modo"};
+    static const char *topics[] = {"KattDenisse/feeds/lim-superior", "KattDenisse/feeds/lim-inferior"
+    		, "KattDenisse/feeds/modo", "KattDenisse/feeds/setpoint"};
+   int qos[]                  						 = {1, 1, 1, 1};
     err_t err;
     int i;
 
-    mqtt_set_inpub_callback(client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb,
-                            LWIP_CONST_CAST(void *, &mqtt_client_info));
+    mqtt_set_inpub_callback(client, mqtt_incoming_publish_cb, mqtt_incoming_data_cb, LWIP_CONST_CAST(void *, &mqtt_client_info));
+																		
 
     for (i = 0; i < ARRAY_SIZE(topics); i++)
     {
@@ -244,6 +261,7 @@ static void mqtt_subscribe_topics(mqtt_client_t *client)
         {
             PRINTF("Subscribing to the topic \"%s\" with QoS %d...\r\n", topics[i], qos[i]);
         }
+
         else
         {
             PRINTF("Failed to subscribe to the topic \"%s\" with QoS %d: %d.\r\n", topics[i], qos[i], err);
@@ -331,15 +349,51 @@ static void mqtt_message_published_cb(void *arg, err_t err)
 /*!
  * @brief Publishes a message. To be called on tcpip_thread.
  */
-static void publish_humidity(void *ctx)
+static void publish_Air_conditioner(void *ctx)
 {
-    static const char *topic   = "KattDenisse/feeds/moisture";
+    static const char *topic   = "KattDenisse/feeds/aire-acondicionado";
     static char message[10];
 
     LWIP_UNUSED_ARG(ctx);
 
-    memset(message, 50, 10);
-    sprintf(message, "%d", humidity_sensor);
+    memset(message, 10, sizeof(message));
+    sprintf(message, "%d", u32Air_sensor);
+
+    PRINTF("Going to publish to the topic \"%s\"...\r\n", topic);
+
+    mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_message_published_cb, (void *)topic);
+}
+
+/*!
+ * @brief Publishes a message. To be called on tcpip_thread.
+ */
+static void publish_temperature(void *ctx)
+{
+    static const char *topic   = "KattDenisse/feeds/termometro";
+    static char message[10];
+
+    LWIP_UNUSED_ARG(ctx);
+
+    memset(message, 10, sizeof(message));
+    sprintf(message, "%d", u32Temp_sensor);
+
+    PRINTF("Going to publish to the topic \"%s\"...\r\n", topic);
+
+    mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_message_published_cb, (void *)topic);
+}
+
+/*!
+ * @brief Publishes a message. To be called on tcpip_thread.
+ */
+static void publish_MarkAir(void *ctx)
+{
+    static const char *topic   = "KattDenisse/feeds/estado";
+    static char message[10];
+
+    LWIP_UNUSED_ARG(ctx);
+
+    memset(message, 10, sizeof(message));
+    sprintf(message, "%d", u32Temp_sensor);
 
     PRINTF("Going to publish to the topic \"%s\"...\r\n", topic);
 
@@ -450,16 +504,29 @@ static void app_thread(void *arg)
 		}
 		else if(uxBits & MQTT_SENSOR_EVT ) {
 			PRINTF("MQTT_SENSOR_EVT.\r\n");
-			// Simulate the humidity %, in steps of 5, range is 10% to 100%.
-			// If the sprinkler is On, the humidity will tent to rise.
-			humidity_sensor = get_simulated_sensor(humidity_sensor, 2, 10, 100, sprinklers_on);
-			if((samples_cnt++%10) == 9){
-				err = tcpip_callback(publish_humidity, NULL);
+																   
+//			// If the sprinkler is On, the humidity will tent to rise.
+//			/* Humidity
+//			 * Simulate the Humidity %
+//			 * Steps of 2
+//			 * range 0°C to 50°C
+//			 */
+//			u32Air_sensor = get_simulated_sensor(u32Air_sensor, 2, 0, 50, sprinklers_on);
+//			/* Temperature
+//			 * Simulate the temperature °C
+//			 * Steps of 2
+//			 * range 0°C to 50°C
+//			 */
+			u32Temp_sensor = get_simulated_sensor(u32Temp_sensor, 2, 0, 50, sprinklers_on);
+			if((samples_cnt++%5) == 4){
+				err = tcpip_callback(publish_Air_conditioner, NULL);
+				err |= tcpip_callback(publish_temperature, NULL);
 				if (err != ERR_OK)
 				{
-					PRINTF("Failed to invoke publish_humidity on the tcpip_thread: %d.\r\n", err);
+					PRINTF("Failed to invoke publish_Air_conditioner or publish_temperature on the tcpip_thread: %d.\r\n", err);
 				}
 			}
+
 		}
 		else if(uxBits & MQTT_SPRINKLERS_EVT ) {
 			PRINTF("MQTT_SPRINKLERS_EVT.\r\n");
