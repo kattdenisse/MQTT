@@ -103,8 +103,8 @@
 #define BOARD_LED_GPIO_PIN BOARD_LED_RED_GPIO_PIN
 
 #define MQTT_nMaxSuscribers				(50)
-#define MQTT_nMAX_LIM					(0x3530U)
-#define MQTT_nMIN_LIM					(0x0U)
+#define MQTT_nMAX_LIM					(50U)
+#define MQTT_nMIN_LIM					(0U)
 #define MQTT_nAUTO_MODE					(1U)
 #define MQTT_nMANUAL_MODE				(0U)
 #define MQTT_nINCREASE					(2U)
@@ -115,7 +115,7 @@
 #define MQTT_nINIT_EXPON				(1U)
 #define MQTT_nINVALID_VALUE				(0U)
 #define MQTT_nBASE_EXPONENT				(10U)
-#define MQTT_nMIN_LIM					(-1U)
+#define MQTT_nINVALID_LEN				(-1U)
 #define MQTT_nADJUS_POS					(1U)
 
 /*******************************************************************************
@@ -220,7 +220,7 @@ static uint32_t MQTT_s_u32ConvertASCIIHex(const uint8_t* pu8Char, uint16_t u16Le
     }
 
     s16i = u16Len - (uint16_t)MQTT_nADJUS_POS;
-    while (s16i > (int16_t)MQTT_nMIN_LIM)
+    while (s16i > (int16_t)MQTT_nINVALID_LEN)
     {
     	if(u8Temp[s16i] != (uint8_t)MQTT_nINVALID_VALUE)
     	{
@@ -266,7 +266,7 @@ static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t f
     	u8Mode_state = (uint8_t)MQTT_nAUTO_MODE;
     	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
-    if(!memcmp(data, "ON", 2)) {
+    else if(!memcmp(data, "ON", 2)) {
     	u8Air_power = (uint8_t)MQTT_nON;
    	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
