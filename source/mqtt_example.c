@@ -478,7 +478,7 @@ static void MQTT_s_vTempControl(void)
 	{
 		if(u8Air_power != (uint8_t)MQTT_nOFF)
 		{
-			MQTT_s_vTempControl();
+			MQTT_s_vTempSimulator();
 			u32Air_state = (uint32_t)MQTT_nON;
 		}
 		else
@@ -490,7 +490,7 @@ static void MQTT_s_vTempControl(void)
 	{
 		if(u32Air_sensor != u32Temp_sensor)
 		{
-			MQTT_s_vTempControl();
+			MQTT_s_vTempSimulator();
 			u32Air_state = (uint32_t)MQTT_nON;
 		}
 		else
