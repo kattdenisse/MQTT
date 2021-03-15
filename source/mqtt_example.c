@@ -82,7 +82,7 @@
 #define EXAMPLE_MQTT_SERVER_HOST "io.adafruit.com"
 
 #define EXAMPLE_MQTT_USER "KattDenisse"
-#define EXAMPLE_MQTT_PSWD "aio_YwDW97vt9S1yIHXUioPyeF8MiMgr"
+#define EXAMPLE_MQTT_PSWD "aio_IehY51tajPy6SO3QXFl7K5jJgGTC"
 
 /*! @brief MQTT server port number. */
 #define EXAMPLE_MQTT_SERVER_PORT 1883
@@ -103,6 +103,20 @@
 #define BOARD_LED_GPIO_PIN BOARD_LED_RED_GPIO_PIN
 
 #define MQTT_nMaxSuscribers				(50)
+#define MQTT_nMAX_LIM					(50U)
+#define MQTT_nMIN_LIM					(0U)
+#define MQTT_nAUTO_MODE					(1U)
+#define MQTT_nMANUAL_MODE				(0U)
+#define MQTT_nINCREASE					(2U)
+#define MQTT_nDECREASE					(2U)
+#define MQTT_nON						(1U)
+#define MQTT_nOFF						(0U)
+#define MQTT_nARRA_SIZE					(512U)
+#define MQTT_nINIT_EXPON				(1U)
+#define MQTT_nINVALID_VALUE				(0U)
+#define MQTT_nBASE_EXPONENT				(10U)
+#define MQTT_nINVALID_LEN				(-1U)
+#define MQTT_nADJUS_POS					(1U)
 
 /*******************************************************************************
  * Prototypes
@@ -151,11 +165,12 @@ EventGroupHandle_t xEventGroup;
 
 TimerHandle_t xTimerSensor;
 
-uint32_t u32Air_sensor = 15;
-uint32_t u32Temp_sensor = 20;
-uint32_t TempDes_sensor = 30;
-uint32_t samples_cnt = 0;
-uint8_t u8Mode_state = 0U;
+static uint32_t u32Air_sensor = 15;
+static uint32_t u32Temp_sensor = 20;
+static uint32_t samples_cnt = 0;
+static uint8_t u8Mode_state = 0U;
+static uint32_t u32Air_state = 0U;
+static uint8_t u8Air_power = 0U;
 bool sprinklers_on;
 
 
@@ -191,12 +206,43 @@ static void mqtt_incoming_publish_cb(void *arg, const char *topic, u32_t tot_len
 
 }
 
+static uint32_t MQTT_s_u32ConvertASCIIHex(const uint8_t* pu8Char, uint16_t u16Len)
+{
+    uint16_t u16i;
+    int16_t s16i;
+    uint8_t u8Temp[MQTT_nARRA_SIZE] = {0U};
+    uint32_t u32Result;
+    uint32_t u32Exponent = MQTT_nINIT_EXPON;
+
+    for (u16i = 0U; u16i < u16Len; u16i++)
+    {
+    	u8Temp[u16i] = pu8Char[u16i] - '0';
+    }
+
+    s16i = u16Len - (uint16_t)MQTT_nADJUS_POS;
+    while (s16i > (int16_t)MQTT_nINVALID_LEN)
+    {
+    	if(u8Temp[s16i] != (uint8_t)MQTT_nINVALID_VALUE)
+    	{
+    		u32Result += (u8Temp[s16i] * u32Exponent);
+    	}
+    	else
+    	{
+    	}
+    	u32Exponent *= (uint32_t)MQTT_nBASE_EXPONENT;
+    	s16i--;
+    }
+
+    return u32Result;
+}
+
 /*!
  * @brief Called when recieved incoming published message fragment.
  */
 static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t flags)
 {
     int i;
+    uint32_t u32Data = 0U;
 
     LWIP_UNUSED_ARG(arg);
 
@@ -213,23 +259,30 @@ static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t f
     }
 
     if(!memcmp(data, "Manual", 6)) {
-    	u8Mode_state = 1U;
-//   	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
+    	u8Mode_state = (uint8_t)MQTT_nMANUAL_MODE;
+   	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
     else if(!memcmp(data, "Auto", 4)) {
-    	u8Mode_state = 0U;
-//    	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
+    	u8Mode_state = (uint8_t)MQTT_nAUTO_MODE;
+    	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
-    else if(!memcmp(data, 1, 1)) {
-        PRINTF("\r Button ON\r\n");
+    else if(!memcmp(data, "ON", 2)) {
+    	u8Air_power = (uint8_t)MQTT_nON;
+   	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
-    else if(!memcmp(data, 2, 1)) {
-        PRINTF("\r Button OFF\r\n");
+    else if(!memcmp(data, "OFF", 3)) {
+    	u8Air_power = (uint8_t)MQTT_nOFF;
+    	xEventGroupSetBits(xEventGroup,	MQTT_SPRINKLERS_EVT);
     }
-    else if(!memcmp(data, "55", 1)) {
+    else
+    {
+    	u32Data = MQTT_s_u32ConvertASCIIHex(data, len);
+    	if((u32Data > (uint32_t)MQTT_nMIN_LIM) && (u32Data < (uint32_t)MQTT_nMAX_LIM))
+    	{
     	//Temperatura deseada
-    	TempDes_sensor = *data;
-        PRINTF("\r Temperature Des: %d\r\n", TempDes_sensor);
+    	u32Air_sensor = u32Data;
+        PRINTF("\r Temperature Des: %d\r\n", u32Air_sensor);
+    	}
     }
 
     if (flags & MQTT_DATA_FLAG_LAST)
@@ -243,10 +296,8 @@ static void mqtt_incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t f
  */
 static void mqtt_subscribe_topics(mqtt_client_t *client)
 {
-//    static const char *topics[] = {"KattDenisse/feeds/modo"};
-    static const char *topics[] = {"KattDenisse/feeds/lim-superior", "KattDenisse/feeds/lim-inferior"
-    		, "KattDenisse/feeds/modo", "KattDenisse/feeds/setpoint"};
-   int qos[]                  						 = {1, 1, 1, 1};
+    static const char *topics[] = {"KattDenisse/feeds/power", "KattDenisse/feeds/modo", "KattDenisse/feeds/setpoint"};
+   int qos[]                  						 = {1, 1, 1};
     err_t err;
     int i;
 
@@ -393,11 +444,60 @@ static void publish_MarkAir(void *ctx)
     LWIP_UNUSED_ARG(ctx);
 
     memset(message, 10, sizeof(message));
-    sprintf(message, "%d", u32Temp_sensor);
+    sprintf(message, "%d", u32Air_state);
 
     PRINTF("Going to publish to the topic \"%s\"...\r\n", topic);
 
     mqtt_publish(mqtt_client, topic, message, strlen(message), 1, 0, mqtt_message_published_cb, (void *)topic);
+}
+
+/*!
+ * @brief Temperature Simulator °C.
+ */
+static void MQTT_s_vTempSimulator(void)
+{
+	if(u32Air_sensor > u32Temp_sensor)
+	{
+		u32Temp_sensor += (uint32_t)MQTT_nINCREASE;
+	}
+	else if(u32Air_sensor < u32Temp_sensor)
+	{
+		u32Temp_sensor -= (uint32_t)MQTT_nDECREASE;
+	}
+	else
+	{
+	}
+}
+
+/*!
+ * @brief Temperature Control.
+ */
+static void MQTT_s_vTempControl(void)
+{
+	if(u8Mode_state != (uint8_t)MQTT_nAUTO_MODE)
+	{
+		if(u8Air_power != (uint8_t)MQTT_nOFF)
+		{
+			MQTT_s_vTempSimulator();
+			u32Air_state = (uint32_t)MQTT_nON;
+		}
+		else
+		{
+			u32Air_state = (uint32_t)MQTT_nOFF;
+		}
+	}
+	else
+	{
+		if(u32Air_sensor != u32Temp_sensor)
+		{
+			MQTT_s_vTempSimulator();
+			u32Air_state = (uint32_t)MQTT_nON;
+		}
+		else
+		{
+			u32Air_state = (uint32_t)MQTT_nOFF;
+		}
+	}
 }
 
 /*!
@@ -502,24 +602,15 @@ static void app_thread(void *arg)
 			//Start the sensor timer
 			xTimerStart(xTimerSensor, 0);
 		}
-		else if(uxBits & MQTT_SENSOR_EVT ) {
+		else if(uxBits & MQTT_SENSOR_EVT )
+		{
 			PRINTF("MQTT_SENSOR_EVT.\r\n");
 																   
-//			// If the sprinkler is On, the humidity will tent to rise.
-//			/* Humidity
-//			 * Simulate the Humidity %
-//			 * Steps of 2
-//			 * range 0°C to 50°C
-//			 */
-//			u32Air_sensor = get_simulated_sensor(u32Air_sensor, 2, 0, 50, sprinklers_on);
-//			/* Temperature
-//			 * Simulate the temperature °C
-//			 * Steps of 2
-//			 * range 0°C to 50°C
-//			 */
-			u32Temp_sensor = get_simulated_sensor(u32Temp_sensor, 2, 0, 50, sprinklers_on);
-			if((samples_cnt++%5) == 4){
+			MQTT_s_vTempControl();
+
+			if((samples_cnt++%2) == 1){
 				err = tcpip_callback(publish_Air_conditioner, NULL);
+				err |= tcpip_callback(publish_MarkAir, NULL);
 				err |= tcpip_callback(publish_temperature, NULL);
 				if (err != ERR_OK)
 				{
